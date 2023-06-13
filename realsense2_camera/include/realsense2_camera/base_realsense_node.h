@@ -195,6 +195,83 @@ namespace realsense2_camera
                 double          m_time;
         };
 
+        template <class T, void (rs400::advanced_mode::*set_method)(const T&), T (rs400::advanced_mode::*get_method)(int) const>
+        class AdvanceParamsModule
+        {
+            private:
+                std::string module_name;
+                std::vector<T> vals;
+
+            public:
+                AdvanceParamsModule(std::string module_name)
+                {
+                    this->module_name = module_name;
+                }
+                template <class ParamType>
+                void setParam(BaseRealSenseNode *context, std::shared_ptr<ddynamic_reconfigure::DDynamicReconfigure>& ddynrec,std::string param_name, ParamType T::*field, std::string desc = "")
+                {
+                    rs2::device dev = context->_dev;
+                    rs400::advanced_mode adv = dev.as<rs400::advanced_mode>();
+                    if (vals.empty())
+                    {
+                        vals.resize(3);
+                        vals[0] = (adv.*get_method)(0);
+                        vals[1] = (adv.*get_method)(1); // Min values
+                        vals[2] = (adv.*get_method)(2); // Max values
+                    }
+
+                    param_name = this->module_name + "_" + param_name;
+                    ParamType from_value = ParamType(vals[1].*field);
+                    ParamType to_value = ParamType(vals[2].*field);
+
+                    if (std::is_same<int, ParamType>::value || std::is_same<uint32_t, ParamType>::value)
+                    {
+                        auto function_int = [=](int new_value)
+                        {
+                            rs400::advanced_mode adv = dev.as<rs400::advanced_mode>();
+                            T group = (adv.*get_method)(0);
+
+                            if (int(from_value) > new_value || int(to_value) < new_value) {
+                                ROS_WARN_STREAM("Param '" << param_name << "' has value " << new_value
+                                << " outside the range [" << int(from_value)  << ", " << int(to_value)
+                                << "]. Using current sensor value " <<  int(group.*field) << " instead.");
+                                return;
+                            }
+
+                            group.*field = new_value;
+                            (adv.*set_method)(group);
+                        };
+                        ddynrec->registerVariable<int>(
+                            param_name, int(vals[0].*field), function_int, desc, int(from_value), int(to_value));
+                    }
+                    else if (std::is_same<float, ParamType>::value || std::is_same<double, ParamType>::value)
+                    {
+                        auto function_int = [=](double new_value)
+                        {
+                            rs400::advanced_mode adv = dev.as<rs400::advanced_mode>();
+                            T group = (adv.*get_method)(0);
+
+                            if (from_value > new_value || to_value < new_value) {
+                                ROS_WARN_STREAM("Param '" << param_name << "' has value " << new_value
+                                << " outside the range [" << double(from_value)  << ", " << double(to_value)
+                                << "]. Using current sensor value " <<  double(group.*field) << " instead.");
+                                return;
+                            }
+
+                            group.*field = new_value;
+                            (adv.*set_method)(group);
+                        };
+                        ddynrec->registerVariable<double>(
+                            param_name, double(vals[0].*field), function_int, desc, double(from_value), double(to_value));
+                    }
+                    else
+                    {
+                        ROS_ERROR_STREAM("Type of " << param_name << " is not supported");
+                        return;
+                    }
+                }
+        };
+
         static std::string getNamespaceStr();
         void getParameters();
         void setupDevice();
@@ -249,6 +326,7 @@ namespace realsense2_camera
         void registerAutoExposureROIOptions(ros::NodeHandle& nh);
         void set_auto_exposure_roi(const std::string option_name, rs2::sensor sensor, int new_value);
         void set_sensor_auto_exposure_roi(rs2::sensor sensor);
+        void registerAdvancedModeParams(ros::NodeHandle& nh);
         rs2_stream rs2_string_to_stream(std::string str);
         void startMonitoring();
         void publish_temperature();

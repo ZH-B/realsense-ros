@@ -250,6 +250,7 @@ void BaseRealSenseNode::publishTopics()
     setupStreams();
     SetBaseStream();
     registerAutoExposureROIOptions(_node_handle);
+    registerAdvancedModeParams(_node_handle);
     publishStaticTransforms();
     publishIntrinsics();
     startMonitoring();
@@ -443,6 +444,49 @@ void BaseRealSenseNode::registerAutoExposureROIOptions(ros::NodeHandle& nh)
         }
     }
 }
+
+void BaseRealSenseNode::registerAdvancedModeParams(ros::NodeHandle& nh)
+{
+    if (_dev.is<rs400::advanced_mode>())
+    {
+        rs400::advanced_mode adv = _dev.as<rs400::advanced_mode>();
+        if (!adv.is_enabled())
+            return;
+
+        for (const std::pair<stream_index_pair, std::vector<rs2::stream_profile>>& profile : _enabled_profiles)
+        {
+            rs2::sensor sensor = _sensors[profile.first];
+            std::string module_base_name(sensor.get_info(RS2_CAMERA_INFO_NAME));
+
+            if (sensor.is<rs2::depth_sensor>()) {
+                std::string module_name = create_graph_resource_name(module_base_name) +"/advanced_mode";
+                ros::NodeHandle nh1(nh, module_name);
+                std::shared_ptr<ddynamic_reconfigure::DDynamicReconfigure> ddynrec = std::make_shared<ddynamic_reconfigure::DDynamicReconfigure>(nh1);
+                ROS_INFO_STREAM("registerAdvancedModeParams " << module_name);
+                {
+                    AdvanceParamsModule<STDepthControlGroup, &rs400::advanced_mode::set_depth_control, &rs400::advanced_mode::get_depth_control> depthControlModule("depth_control");
+#define SET_DC_PARAM(name, desc) depthControlModule.setParam(this, ddynrec, #name, &STDepthControlGroup::name, desc)
+                    SET_DC_PARAM(deepSeaSecondPeakThreshold,     "DS Second Peak Threshold");
+                    SET_DC_PARAM(deepSeaNeighborThreshold,       "DS Neighbor Threshold");
+                    SET_DC_PARAM(deepSeaMedianThreshold,         "DS Median Threshold");
+                    SET_DC_PARAM(plusIncrement,                  "Estimate Median Increment");
+                    SET_DC_PARAM(minusDecrement,                 "Estimate Median Decrement");
+                    SET_DC_PARAM(scoreThreshA,                   "Score Minimum Threshold");
+                    SET_DC_PARAM(scoreThreshB,                   "Score Maximum Threshold");
+                    SET_DC_PARAM(lrAgreeThreshold,               "DS LR Threshold");
+                    SET_DC_PARAM(textureCountThreshold,          "Texture Count Threshold");
+                    SET_DC_PARAM(textureDifferenceThreshold,     "Texture Difference Threshold");
+#undef SET_DC_PARAM
+                }
+
+                ddynrec->publishServicesTopics();
+                _ddynrec.push_back(ddynrec);
+            }
+
+        }
+    }
+}
+
 
 void BaseRealSenseNode::registerDynamicOption(ros::NodeHandle& nh, rs2::options sensor, std::string& module_name)
 {
